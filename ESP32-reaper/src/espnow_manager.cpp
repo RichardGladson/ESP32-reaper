@@ -15,10 +15,17 @@ EspNowManager::EspNowManager()
       last_discovery_ms_(0),
       last_heartbeat_rx_ms_(0),
       last_heartbeat_tx_ms_(0),
-      cmd_handler_(nullptr) {
+      cmd_handler_(nullptr),
+      hb_mode_(0),
+      hb_radio_status_(0) {
     memset(local_mac_, 0, 6);
     memset(core_mac_, 0, 6);
     instance_ = this;
+}
+
+void EspNowManager::setHeartbeatFields(uint8_t mode, uint8_t radio_status) {
+    hb_mode_ = mode;
+    hb_radio_status_ = radio_status;
 }
 
 bool EspNowManager::begin() {
@@ -109,8 +116,8 @@ void EspNowManager::update() {
             last_heartbeat_tx_ms_ = now;
             HeartbeatPayload hb = {};
             hb.uptime_ms = now;
-            hb.mode = 0; // filled by higher layer if desired
-            hb.radio_status = 0;
+            hb.mode = hb_mode_;
+            hb.radio_status = hb_radio_status_;
             sendToCore(PacketType::HEARTBEAT, &hb, sizeof(hb));
         }
     }

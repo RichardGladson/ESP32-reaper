@@ -42,8 +42,7 @@ void StateManager::transitionTo(SystemState next) {
             break;
         case SystemState::CORE_CONNECTED:
             led_.setPattern(LedPattern::CORE_CONNECTED);
-            // Standalone button functions disabled while Core-controlled
-            survey_active_ = false;
+            // Keep any active survey running; Core commands control start/stop
             break;
         case SystemState::STANDALONE:
             if (standalone_mode_ == OperatingMode::BLUETOOTH_SURVEY) {
@@ -102,15 +101,21 @@ void StateManager::update() {
                 transitionTo(SystemState::STANDALONE);
                 break;
             }
-            // Core commands have priority. Standalone button functions disabled.
-            // Optional emergency stop on long hold could be added here.
+            // Feed live mode/radio health into ESP-NOW heartbeats
+            espnow_.setHeartbeatFields(
+                static_cast<uint8_t>(standalone_mode_),
+                radio_.getHealthBitfield());
+            // Continue survey stepping under Core control
+            if (survey_active_) {
+                runSurveyStep();
+            }
+            // Emergency local stop on long hold
             if (btn == ButtonEvent::LONG_HOLD) {
-                // Documented emergency local stop
                 LOG_I("Button: emergency STOP while Core-controlled");
                 survey_active_ = false;
                 radio_.stopAll();
+                sendStatusResponse();
             }
-            // Short press ignored while Core-controlled
             break;
 
         case SystemState::STANDALONE:
@@ -228,6 +233,7 @@ void StateManager::handleCoreCommand(const ProtocolPacket& pkt) {
                 }
                 LOG_I("Core SCAN command: type=%u %u-%u step %u",
                       sc.survey_type, survey_start_, survey_end_, survey_step_);
+                sendStatusResponse();
             }
             break;
 
@@ -235,6 +241,7 @@ void StateManager::handleCoreCommand(const ProtocolPacket& pkt) {
             survey_active_ = false;
             radio_.stopAll();
             LOG_I("Core STOP command");
+            sendStatusResponse();
             break;
 
         default:
@@ -263,6 +270,7 @@ void StateManager::applyModeCommand(OperatingMode mode) {
             radio_.enableRadio(static_cast<RadioId>(i), true);
         }
     }
+    sendStatusResponse();
 }
 
 void StateManager::sendStatusResponse() {

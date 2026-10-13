@@ -47,6 +47,9 @@ public:
     /** Called when Core heartbeat times out. */
     void onCoreTimeout();
 
+    /** Update fields included in outgoing heartbeats. */
+    void setHeartbeatFields(uint8_t mode, uint8_t radio_status);
+
 private:
     EspNowState state_;
     uint8_t local_mac_[6];
@@ -57,6 +60,8 @@ private:
     uint32_t last_heartbeat_rx_ms_;
     uint32_t last_heartbeat_tx_ms_;
     CommandHandler cmd_handler_;
+    uint8_t hb_mode_;
+    uint8_t hb_radio_status_;
 
     static EspNowManager* instance_;  // for static callbacks
 
