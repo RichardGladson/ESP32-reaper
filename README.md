@@ -1,62 +1,81 @@
-# DOOMBOX REAPER
+# ESP32-Reaper 💀
 
 **Modular ESP32-C3 RF survey / security-research field module**
 
-REAPER is the radio/field node of the larger DOOMBOX system.  
-DOOMBOX CORE / WRAITH will act as the controller; REAPER can also operate fully standalone.
+REAPER is the radio/field node of the [doomBOX](https://github.com/richardGladson/doomBOX) system.  
+**doomBOX** is the controller (OLED UI, Wi‑Fi/BLE tools); **Reaper** is the remote triple-nRF24 sensor that can also run fully standalone.
 
-This firmware does **not** implement Bluetooth or Wi-Fi interference / jamming.  
-It provides passive channel observation, coordinated multi-radio channel stepping, status reporting, and a clean ESP-NOW command interface for a future CORE.
+This firmware does **not** implement Bluetooth or Wi‑Fi jamming or continuous carrier.  
+It provides passive 2.4 GHz channel observation, coordinated multi-radio stepping, status reporting, and an ESP‑NOW command interface for doomBOX.
+
+**Repository:** [github.com/RichardGladson/ESP32-reaper](https://github.com/RichardGladson/ESP32-reaper)
 
 ---
 
-## Purpose
+## System role
 
-- Three independent nRF24L01 radios on a shared SPI bus for 2.4 GHz ISM band observation
-- Automatic discovery and pairing with a DOOMBOX CORE over ESP-NOW
-- Core-controlled mode (commands have priority) and fully usable standalone mode
-- Non-blocking state machine, button handling, and LED status patterns
-- Clean, versioned protocol so CORE firmware can be written later without rewriting REAPER
+| Role | Repo | What it does |
+|------|------|----------------|
+| **doomBOX** | [richardGladson/doomBOX](https://github.com/richardGladson/doomBOX) | Controller UI — discover/pair Reaper, send survey commands, show status |
+| **ESP32-Reaper (this repo)** | [RichardGladson/ESP32-reaper](https://github.com/RichardGladson/ESP32-reaper) | 3× nRF24 field node — passive survey, heartbeats, command execution |
+
+**With doomBOX:** power Reaper → on doomBOX open **Reaper** (main menu, right column) → wait for **PAIRED** → start BT/Wi‑Fi survey or stop from the OLED.
+
+**Standalone:** short press toggles survey on/off; hold ~2 s switches between Bluetooth-range and Wi‑Fi-range channel sets. LED shows mode.
 
 ---
 
 ## Hardware
 
-| Component            | Details                          |
-|----------------------|----------------------------------|
-| MCU                  | ESP32-C3 Super Mini              |
-| Radios               | 3 × nRF24L01 (+PA/LNA optional)  |
-| Status LED           | GPIO1                            |
-| Mode button          | GPIO10 (active-low, internal pull-up) |
+| Component | Details |
+|-----------|---------|
+| MCU | ESP32-C3 Super Mini |
+| Radios | 3 × nRF24L01 (+PA/LNA optional) |
+| Status LED | GPIO 1 |
+| Mode button | GPIO 10 (active-low, internal pull-up) |
 
-### Exact pinout
+### Pinout
 
-| Function          | GPIO |
-|-------------------|------|
-| SPI SCK           | 4    |
-| SPI MISO          | 6    |
-| SPI MOSI          | 7    |
-| Radio 1 CE        | 0    |
-| Radio 1 CSN       | 2    |
-| Radio 2 CE        | 3    |
-| Radio 2 CSN       | 5    |
-| Radio 3 CE        | 8    |
-| Radio 3 CSN       | 9    |
-| Status LED        | 1    |
-| Mode button       | 10   |
+| Function | GPIO |
+|----------|------|
+| SPI SCK | 4 |
+| SPI MISO | 6 |
+| SPI MOSI | 7 |
+| Radio 1 CE | 0 |
+| Radio 1 CSN | 2 |
+| Radio 2 CE | 3 |
+| Radio 2 CSN | 5 |
+| Radio 3 CE | 8 |
+| Radio 3 CSN | 9 |
+| Status LED | 1 |
+| Mode button | 10 |
 
-All three nRF24 modules share SCK / MISO / MOSI.  
-Each has its own CE and CSN. IRQ lines are unused.  
-VCC = 3.3 V, GND = common ground.  
-**Do not power nRF24 modules from 5 V.**
+All three nRF24 modules share SCK / MISO / MOSI; each has its own CE and CSN. IRQ lines are unused.  
+**VCC = 3.3 V only. Do not power nRF24 modules from 5 V.**
 
 ### GPIO notes (ESP32-C3)
 
-- GPIO0 is a strapping pin; used here as CE (output). Ensure the radio does not drive it during boot.
-- GPIO8 / GPIO9 are also strapping-related on some C3 boards; treat as normal GPIOs after boot.
-- USB-CDC is enabled (`ARDUINO_USB_CDC_ON_BOOT`). Serial appears on the USB port.
+- GPIO 0 is a strapping pin (used as CE). Ensure the radio does not drive it during boot.
+- GPIO 8 / 9 are strapping-related on some boards; treat as normal GPIOs after boot.
+- USB-CDC is enabled (`ARDUINO_USB_CDC_ON_BOOT`); serial appears on the USB port.
 
-**Hardware has not been physically validated.** Pin assignments follow the design specification and should be verified on first power-up.
+> Hardware bring-up should be verified on first power-up (SPI, CE/CSN polarity, LED active level, button, ESP‑NOW coexistence with nRF24).
+
+---
+
+## Features
+
+- Three independent nRF24 instances on one SPI bus (per-radio enable, channel, health)
+- Coordinated channel stepping for wider concurrent coverage
+- Survey modes (channel ranges only — no frame decode):
+  - **Bluetooth survey** — nRF24 channels ~2–80 (~2402–2480 MHz)
+  - **Wi‑Fi survey** — nRF24 channels ~1–14
+- Automatic ESP‑NOW discovery and pairing with doomBOX (no manual MAC entry)
+- Core-controlled mode (commands have priority) and full standalone mode
+- Non-blocking state machine, button handling, LED patterns
+- Versioned binary protocol so doomBOX and Reaper stay compatible
+
+**Not included:** continuous carrier, noise transmission, or jamming. nRF24 has no calibrated continuous RSSI; survey is listen/step only.
 
 ---
 
@@ -65,183 +84,146 @@ VCC = 3.3 V, GND = common ground.
 ```
 main.cpp
   ├── RadioManager      (3× RF24, shared SPI, independent CE/CSN)
-  ├── EspNowManager     (discovery, pairing, command transport)
+  ├── EspNowManager     (discovery, pairing, heartbeats, commands)
   ├── Protocol          (versioned packet format)
   ├── ButtonManager     (debounce, short press, 2 s hold)
   ├── LedManager        (non-blocking patterns)
   └── StateManager      (BOOT → INIT → DISCOVERY → CORE_CONNECTED / STANDALONE)
 ```
 
-Operating-control states are independent of the actual RF survey functions:
+| Mode | Behaviour |
+|------|-----------|
+| **CORE_CONNECTED** | doomBOX commands have priority; short button press ignored; long-hold = local emergency stop |
+| **STANDALONE** | Short press = toggle survey; long-hold = switch BT ↔ Wi‑Fi survey ranges |
 
-1. **CORE-CONTROLLED MODE** – paired with CORE; Core commands have priority; standalone button functions are disabled (long-hold may still trigger a local emergency stop).
-2. **STANDALONE MODE** – no Core present (or Core lost); physical button controls survey start/stop and mode selection.
-
----
-
-## Three-radio architecture
-
-- One `SPIClass` (FSPI) shared by all three `RF24` instances.
-- Individual CE / CSN pins.
-- Radios can be enabled/disabled, channel-configured, and health-checked independently.
-- Failure of one radio does **not** crash the firmware; the health bitfield reports which radios are alive.
-- Coordinated survey stepping can assign staggered channels across the three radios for wider concurrent coverage.
-
-### Hardware limitations (important)
-
-- nRF24L01 does **not** provide continuous energy detection or true RSSI without a received packet.
-- The RPD (Received Power Detector) bit exists on some clones but is not a calibrated RSSI.
-- Channel numbers 0–125 correspond to 2400–2525 MHz (1 MHz steps). This overlaps the 2.4 GHz ISM band used by Bluetooth and Wi-Fi but is **not** a 1:1 map of Bluetooth advertising channels or Wi-Fi channel numbers.
-- This firmware only steps channels and listens. **No continuous carrier or noise transmission is implemented.**
+If the Core heartbeat times out, Reaper falls back to discovery / standalone and keeps trying to re-pair.
 
 ---
 
-## ESP-NOW Core communication
+## ESP‑NOW protocol (with doomBOX)
 
-On boot REAPER:
+On boot Reaper:
 
-1. Initializes Wi-Fi in station mode (no AP connection required).
-2. Initializes ESP-NOW.
-3. Enters automatic discovery and listens for a valid `DISCOVERY_BEACON` from a device advertising `DeviceRole::CORE` or `WRAITH`.
-4. Validates magic, protocol version, and checksum.
-5. Sends a `PAIRING_REQUEST`.
-6. On accepted `PAIRING_RESPONSE`, adds the Core as an ESP-NOW peer and enters **CORE_CONNECTED**.
-7. Exchanges heartbeats; if the Core heartbeat times out, REAPER returns to discovery / standalone and continues trying to re-pair.
+1. Wi‑Fi STA (no AP needed) + ESP‑NOW init  
+2. Listens for `DISCOVERY_BEACON` from role **CORE** (or **WRAITH**)  
+3. Validates magic `0xDB`, protocol version, checksum  
+4. Sends `PAIRING_REQUEST`  
+5. On accepted `PAIRING_RESPONSE`, adds peer → **PAIRED**  
+6. Exchanges heartbeats; timeout → rediscovery  
 
-No manual MAC entry is required for normal operation.
+### Packet types (summary)
 
-### Protocol overview
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `DISCOVERY_BEACON` | Core → all | Advertise Core presence |
+| `PAIRING_REQUEST` / `RESPONSE` | Reaper ↔ Core | Pair |
+| `HEARTBEAT` | Both | Keep-alive; Reaper includes mode + radio health |
+| `MODE_COMMAND` | Core → Reaper | Idle / BT survey / Wi‑Fi survey / stop |
+| `SCAN_TEST_COMMAND` | Core → Reaper | Start survey with channel range + hop step |
+| `STOP_COMMAND` | Core → Reaper | Stop activity |
+| `STATUS_REQUEST` / `RESPONSE` | Core ↔ Reaper | Mode, radio bitfield, heap, uptime |
+| `RADIO_CONFIG_COMMAND` | Core → Reaper | Per-radio channel / power / rate |
 
-Every packet has a fixed header:
+ESP‑NOW channel is fixed to **1** (`ESPNOW_CHANNEL` in `config.h`). Encryption is off (`encrypt = false`); application-layer auth can be added later.
 
-- Magic (`0xDB`)
-- Protocol version
-- Packet type (enum)
-- Sender role
-- Sender ID (6-byte MAC)
-- Sequence number
-- Payload length
-- Checksum (XOR of header fields)
-
-Packet types include: discovery/pairing, heartbeat, status request/response, mode command, radio configuration, scan/test, stop, and error responses.  
-The design is intentionally extensible for future CORE versions.
+Full definitions: `src/protocol.h` / `protocol.cpp`.
 
 ---
 
-## Standalone mode
+## Standalone controls
 
-When not connected to CORE:
+| Action | Behaviour |
+|--------|-----------|
+| Short press | Toggle current survey on/off |
+| Hold ~2 seconds | Switch between Bluetooth and Wi‑Fi survey ranges |
 
-| Action              | Behaviour                                      |
-|---------------------|------------------------------------------------|
-| Short press         | Toggle the currently selected survey on/off    |
-| Hold 2 seconds      | Switch between BLUETOOTH_SURVEY and WIFI_SURVEY |
-
-Button handling is fully non-blocking (debounce, press/release detection, hold detection) and does not use `delay()`.
-
-While **CORE_CONNECTED**, short-press is ignored; long-hold is treated as a local emergency stop only.
+Non-blocking debounce/hold; no `delay()` in the main loop.
 
 ---
 
-## LED status patterns (GPIO1)
+## LED patterns (GPIO 1)
 
-| State                     | Pattern                          |
-|---------------------------|----------------------------------|
-| BOOT                      | Slow pulse (~1 Hz)               |
-| INITIALIZING RADIOS       | Rapid blink                      |
-| SEARCHING FOR CORE        | Short periodic blink             |
-| CORE CONNECTED            | Solid on                         |
-| STANDALONE BT SURVEY      | Double-blink                     |
-| STANDALONE WIFI SURVEY    | Triple-blink                     |
-| ERROR                     | Very rapid blink                 |
-
-All patterns are non-blocking.
+| State | Pattern |
+|-------|---------|
+| BOOT | Slow pulse (~1 Hz) |
+| Initializing radios | Rapid blink |
+| Searching for Core | Short periodic blink |
+| Core connected | Solid on |
+| Standalone BT survey | Double-blink |
+| Standalone Wi‑Fi survey | Triple-blink |
+| Error | Very rapid blink |
 
 ---
 
-## Software dependencies
+## Build
 
-- PlatformIO + `espressif32` platform
-- Arduino framework
-- [RF24](https://github.com/nRF24/RF24) library (`nrf24/RF24@^1.4.10`)
-- ESP-IDF Wi-Fi / ESP-NOW stack (bundled with the Arduino core)
-
----
-
-## Build instructions
+**Toolchain:** [PlatformIO](https://platformio.org/)
 
 ```bash
-# Clone / extract the project
-cd doombox-reaper
-
-# Build
+cd ESP32-reaper   # directory with platformio.ini
 pio run
-
-# Upload (adjust port as needed)
 pio run -t upload
-
-# Serial monitor
 pio device monitor
 ```
 
-Board environment: `esp32-c3-devkitm-1` (compatible with most ESP32-C3 Super Mini boards).  
+**Environment:** `esp32-c3-super-mini` · board `esp32-c3-devkitm-1`
+
+**Dependencies:**
+- PlatformIO `espressif32` + Arduino framework  
+- [RF24](https://github.com/nRF24/RF24) (`nrf24/RF24@^1.4.10`)  
+- ESP‑IDF Wi‑Fi / ESP‑NOW (bundled with the Arduino core)
+
 USB-CDC is enabled; the serial port appears as a USB ACM device.
 
 ---
 
-## Current hardware-testing status
+## Project layout
 
-**Not tested on physical hardware.**  
-The ESP32-C3 Super Mini and nRF24 modules had not arrived at the time of firmware development.  
-
-Code prioritizes:
-
-- Compile correctness
-- Isolation of hardware-dependent paths
-- Explicit documentation of assumptions that require bench validation
-
-Items that must be verified on first bring-up:
-
-1. SPI pin mapping and radio communication
-2. CE/CSN polarity and levels
-3. LED active level (HIGH = on assumed)
-4. Button pull-up and active-low behaviour
-5. ESP-NOW range and channel coexistence with the nRF24 radios
-6. Strapping-pin behaviour of GPIO0 / GPIO8 / GPIO9 on the specific Super Mini revision
+```
+ESP32-reaper/
+  platformio.ini
+  src/
+    main.cpp
+    config.h
+    protocol.h / protocol.cpp
+    radio_manager.h / .cpp
+    espnow_manager.h / .cpp
+    state_manager.h / .cpp
+    button_manager.h / .cpp
+    led_manager.h / .cpp
+```
 
 ---
 
 ## Known limitations
 
-- No continuous energy detection / spectrum analyser capability (nRF24 hardware limit).
-- Survey “Bluetooth” / “Wi-Fi” modes only select different nRF24 channel ranges; they do not decode Bluetooth or Wi-Fi frames.
-- ESP-NOW and nRF24 both use the 2.4 GHz band; simultaneous high-duty-cycle operation may affect each other.
-- Protocol encryption is not enabled (ESP-NOW `encrypt = false`). Future CORE versions may add application-layer authentication.
-- One radio failing is handled; complete SPI bus failure is not recoverable without power cycle.
+- No continuous energy detection / spectrum analyser (nRF24 hardware limit).  
+- “Bluetooth” / “Wi‑Fi” modes only select different nRF24 channel ranges; they do not decode frames.  
+- ESP‑NOW and nRF24 both use 2.4 GHz; high duty cycle on both may affect range.  
+- One radio failing is reported in the health bitfield; a full SPI bus failure needs a power cycle.  
+- Protocol encryption is not enabled.
 
 ---
 
-## Future DOOMBOX CORE integration
+## Pairing with doomBOX
 
-REAPER already implements:
+1. Flash and power **ESP32-Reaper**.  
+2. On doomBOX: main menu → **Right** → **Reaper**.  
+3. Wait for **PAIRED** (MAC + radio health on the OLED).  
+4. Run **BT Survey** / **WiFi Survey** / **Stop** / **Refresh Status** from the Reaper UI.  
+5. Center (SEL) exits back to the doomBOX main menu.
 
-- Automatic discovery and pairing
-- Versioned packet format with explicit types
-- Command handlers for mode, radio config, scan/test, stop, and status
-- Heartbeat watchdog and clean fallback to standalone
-
-CORE / WRAITH only needs to:
-
-1. Broadcast `DISCOVERY_BEACON` packets with `DeviceRole::CORE` (or `WRAITH`).
-2. Accept `PAIRING_REQUEST` and reply with `PAIRING_RESPONSE` (status = 0).
-3. Send commands using the same header + payload structures defined in `protocol.h`.
-4. Expect periodic `HEARTBEAT` and `STATUS_RESPONSE` packets from REAPER.
-
-No major rewrite of REAPER should be required.
+doomBOX implements the Core side of the same protocol (`reaper_protocol`, `reaper_manager`, `reaper_ui` in the doomBOX tree).
 
 ---
 
-## License / research use
+## Disclaimer
 
-Intended for legitimate RF survey, educational, and security-research purposes on equipment you own or have permission to test.  
-Comply with local radio regulations.
+Intended for **legitimate RF survey, education, and security research** on equipment you own or have permission to test. Comply with local radio regulations. Authors and contributors accept no liability for misuse.
+
+---
+
+## License
+
+MIT License — same family as [doomBOX](https://github.com/richardGladson/doomBOX) and upstream nyanBOX tooling.  
+Retain copyright notices in source headers. See the repository `LICENSE` file if present, or add a standard MIT `LICENSE` at the repo root.
