@@ -1,4 +1,4 @@
-# ESP32-Reaper 💀
+# ESP32-Reaper 
 
 **Modular ESP32-C3 RF survey / security-research field module**
 
